@@ -33,7 +33,7 @@ executables:
   ppj:
     main:                Main.hs
     source-dirs:         app
-    ghc-options: []
+    ghc-options: -O2
     dependencies:
     - json-parser
     - pretty-simple
@@ -42,9 +42,7 @@ tests:
   json-parser-test:
     main:                Spec.hs
     source-dirs:         test
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
+    ghc-options: -O2
     dependencies:
     - json-parser
+    - QuickCheck

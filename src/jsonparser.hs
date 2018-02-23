@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 module JSONParser where
 
 import Control.Applicative (Alternative(..), optional)
@@ -5,6 +6,7 @@ import Control.Monad (replicateM)
 import Data.Char (isDigit, isHexDigit, isSpace, isControl, chr, digitToInt)
 import Data.Functor (($>))
 import Data.List (intercalate)
+import GHC.Generics (Generic)
 
 newtype Parser i o = Parser { runParser :: i -> Maybe (i, o) }
 
@@ -60,7 +62,7 @@ data JValue = JNull
             | JNumber { significand :: Integer, exponent :: Integer}
             | JArray [JValue]
             | JObject [(String, JValue)]
-            deriving (Eq)
+            deriving (Eq, Generic)
 
 instance Show JValue where
   show value = case value of
@@ -68,9 +70,15 @@ instance Show JValue where
     JBool True  -> "true"
     JBool False -> "false"
     JString s   -> "\"" ++ s ++ "\""
-    JNumber s e -> if e == 0 then show s else show s ++ "e" ++ show e
+    JNumber s e -> case e of
+      0 -> show s
+      _ | e >= (-5) && e < 0 -> printf ("%." ++ show (abs e) ++ "f") (toDouble s e)
+      _ -> show s ++ "e" ++ show e
     JArray a    -> "[" ++ intercalate ", " (map show a) ++ "]"
     JObject o   -> "{" ++ intercalate ", " (map (\(k, v) -> show k ++ ": " ++ show v) o) ++ "}"
+    where
+      toDouble :: Integer -> Integer -> Double
+      toDouble s e = fromInteger s * 10 ^^ e
 
 jNull :: Parser String JValue
 jNull = string "null" $> JNull
