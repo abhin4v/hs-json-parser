@@ -3,10 +3,12 @@ module JSONParser where
 
 import Control.Applicative (Alternative(..), optional)
 import Control.Monad (replicateM)
-import Data.Char (isDigit, isHexDigit, isSpace, isControl, chr, digitToInt)
+import Data.Char (isDigit, isHexDigit, isSpace, isControl, isAscii, chr, ord, digitToInt)
 import Data.Functor (($>))
 import Data.List (intercalate)
 import GHC.Generics (Generic)
+import Numeric (showHex)
+import Text.Printf (printf)
 
 newtype Parser i o = Parser { runParser :: i -> Maybe (i, o) }
 
@@ -69,16 +71,35 @@ instance Show JValue where
     JNull       -> "null"
     JBool True  -> "true"
     JBool False -> "false"
-    JString s   -> "\"" ++ s ++ "\""
+    JString s   -> showJSONString s
     JNumber s e -> case e of
       0 -> show s
       _ | e >= (-5) && e < 0 -> printf ("%." ++ show (abs e) ++ "f") (toDouble s e)
       _ -> show s ++ "e" ++ show e
     JArray a    -> "[" ++ intercalate ", " (map show a) ++ "]"
-    JObject o   -> "{" ++ intercalate ", " (map (\(k, v) -> show k ++ ": " ++ show v) o) ++ "}"
+    JObject o   -> "{" ++ intercalate ", " (map (\(k, v) -> showJSONString k ++ ": " ++ show v) o) ++ "}"
     where
       toDouble :: Integer -> Integer -> Double
       toDouble s e = fromInteger s * 10 ^^ e
+
+      showJSONString s = "\"" ++ concatMap showJSONChar s ++ "\""
+
+      showJSONChar :: Char -> String
+      showJSONChar c = case c of
+        '\'' -> "'"
+        '\"' -> "\\\""
+        '\\' -> "\\\\"
+        '/'  -> "\\/"
+        '\b' -> "\\b"
+        '\f' -> "\\f"
+        '\n' -> "\\n"
+        '\r' -> "\\r"
+        '\t' -> "\\t"
+        _ | isAscii c -> [c]
+        _ -> "\\u" ++ showJSONNonASCIIChar c
+
+      showJSONNonASCIIChar c =
+        let a = "0000" ++ showHex (ord c) "" in drop (length a - 4) a
 
 jNull :: Parser String JValue
 jNull = string "null" $> JNull
