@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric, TupleSections #-}
 module JSONParser where
 
 import Control.Applicative (Alternative(..), optional)
@@ -8,7 +8,6 @@ import Data.Functor (($>))
 import Data.List (intercalate)
 import GHC.Generics (Generic)
 import Numeric (showHex)
-import Text.Printf (printf)
 
 newtype Parser i o = Parser { runParser :: i -> Maybe (i, o) }
 
@@ -16,7 +15,7 @@ instance Functor (Parser i) where
   fmap f p = Parser $ fmap (fmap f) . runParser p
 
 instance Applicative (Parser i) where
-  pure x = Parser $ pure . (\a -> (a, x))
+  pure x = Parser $ pure . (, x)
   pf <*> po = Parser $ \input -> case runParser pf input of
     Nothing -> Nothing
     Just (rest, f) -> fmap f <$> runParser po rest
@@ -61,27 +60,24 @@ separatedBy v s = (:) <$> v <*> many (s *> v) <|> pure []
 data JValue = JNull
             | JBool Bool
             | JString String
-            | JNumber { significand :: Integer, exponent :: Integer}
+            | JNumber { int :: Integer, frac :: [Int], exponent :: Integer}
             | JArray [JValue]
             | JObject [(String, JValue)]
             deriving (Eq, Generic)
 
 instance Show JValue where
   show value = case value of
-    JNull       -> "null"
-    JBool True  -> "true"
-    JBool False -> "false"
-    JString s   -> showJSONString s
-    JNumber s e -> case e of
-      0 -> show s
-      _ | e >= (-5) && e < 0 -> printf ("%." ++ show (abs e) ++ "f") (toDouble s e)
-      _ -> show s ++ "e" ++ show e
-    JArray a    -> "[" ++ intercalate ", " (map show a) ++ "]"
-    JObject o   -> "{" ++ intercalate ", " (map (\(k, v) -> showJSONString k ++ ": " ++ show v) o) ++ "}"
+    JNull          -> "null"
+    JBool True     -> "true"
+    JBool False    -> "false"
+    JString s      -> showJSONString s
+    JNumber s [] 0 -> show s
+    JNumber s f 0  -> show s ++ "." ++ concatMap show f
+    JNumber s [] e -> show s ++ "e" ++ show e
+    JNumber s f e  -> show s ++ "." ++ concatMap show f ++ "e" ++ show e
+    JArray a       -> "[" ++ intercalate ", " (map show a) ++ "]"
+    JObject o      -> "{" ++ intercalate ", " (map (\(k, v) -> showJSONString k ++ ": " ++ show v) o) ++ "}"
     where
-      toDouble :: Integer -> Integer -> Double
-      toDouble s e = fromInteger s * 10 ^^ e
-
       showJSONString s = "\"" ++ concatMap showJSONChar s ++ "\""
 
       showJSONChar :: Char -> String
@@ -154,18 +150,18 @@ jExp = (char 'e' <|> char 'E') *> (mkExp <$> optional (char '+' <|> char '-') <*
     mkExp _ i          = i
 
 jInt :: Parser String JValue
-jInt = JNumber <$> (applySign <$> jInt') <*> pure 0
+jInt = JNumber <$> (applySign <$> jInt') <*> pure [] <*> pure 0
 
 jIntExp :: Parser String JValue
-jIntExp = JNumber <$> (applySign <$> jInt') <*> jExp
+jIntExp = JNumber <$> (applySign <$> jInt') <*> pure [] <*> jExp
 
 jIntFrac :: Parser String JValue
 jIntFrac =
-  (\(sign, i) f -> JNumber (applySign (sign, digitsToNumber 10 i f)) (fromIntegral . negate . length $ f))
+  (\(sign, i) f -> JNumber (applySign (sign, i)) f 0)
   <$> jInt' <*> jFrac
 
 jIntFracExp :: Parser String JValue
-jIntFracExp = (\ ~(JNumber i e) e' -> JNumber i (e + e')) <$> jIntFrac <*> jExp
+jIntFracExp = (\ ~(JNumber i f _) e -> JNumber i f e) <$> jIntFrac <*> jExp
 
 jNumber :: Parser String JValue
 jNumber = jIntFracExp <|> jIntExp <|> jIntFrac <|> jInt
@@ -174,7 +170,7 @@ jArray :: Parser String JValue
 jArray = JArray <$> (char '[' *> (jValue `separatedBy` char ',' `surroundedBy` spaces) <* char ']')
 
 jObject :: Parser String JValue
-jObject = JObject <$> (char '{' *> pair `separatedBy` char ',' <* char '}')
+jObject = JObject <$> (char '{' *> pair `separatedBy` char ',' `surroundedBy` spaces <* char '}')
   where
     pair = (\ ~(JString s) j -> (s, j)) <$> (jString `surroundedBy` spaces) <* char ':' <*> jValue
 
